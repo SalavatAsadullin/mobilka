@@ -19,7 +19,6 @@ export default function RegisterScreen({ navigation }) {
   });
   const [errors, setErrors] = useState({});
 
-  // Загружаем сохранённые поля при открытии (кроме паролей)
   useEffect(() => {
     AsyncStorage.getItem(STORAGE_KEY).then((raw) => {
       if (raw) {
@@ -34,7 +33,6 @@ export default function RegisterScreen({ navigation }) {
     }).catch(() => {});
   }, []);
 
-  // Сохраняем поля при каждом изменении (пароли не сохраняем)
   const updateField = (field, value) => {
     const updated = { ...form, [field]: value };
     setForm(updated);
@@ -89,8 +87,9 @@ export default function RegisterScreen({ navigation }) {
 
     try {
       saveUser(form.name, form.email, form.phone);
-      // После успешной регистрации очищаем сохранённые данные формы
+
       AsyncStorage.removeItem(STORAGE_KEY).catch(() => {});
+      
       Alert.alert('Успешно', 'Аккаунт создан!', [
         { text: 'OK', onPress: () => navigation.replace('Main') },
       ]);

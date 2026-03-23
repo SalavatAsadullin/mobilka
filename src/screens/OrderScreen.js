@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
-  TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Alert,
+  TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Alert, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS, FONTS, SPACING } from '../constants/theme';
 import { saveOrder, loadUser } from '../services/database';
+import { sendOrder } from '../services/firebase';
 
 const TIME_SLOTS = ['09:00–11:00', '11:00–13:00', '13:00–15:00', '15:00–17:00', '17:00–19:00'];
 const STORAGE_KEY = 'order_form';
@@ -17,7 +18,8 @@ export default function OrderScreen({ route, navigation }) {
   const [form, setForm] = useState({ address: '', phone: '', comment: '' });
   const [quantity, setQuantity] = useState(1);
   const [selectedSlot, setSelectedSlot] = useState(null);
-  const [errors, setErrors] = useState({});
+  const [errors, setErrors]       = useState({});
+  const [sending, setSending]     = useState(false);
 
   // Загружаем сохранённые данные формы при открытии экрана
   useEffect(() => {
@@ -100,21 +102,35 @@ export default function OrderScreen({ route, navigation }) {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleOrder = () => {
-    if (validate()) {
-      try {
-        saveOrder(
-          product.brand, product.volume, product.price,
-          form.address, form.phone, quantity, selectedSlot, form.comment
-        );
-      } catch (_) {}
-      // После успешного заказа очищаем сохранённые данные формы
+  const handleOrder = async () => {
+    if (!validate()) return;
+
+    setSending(true);
+    try {
+      // Отправляем заказ в Firebase
+      await sendOrder({
+        brand:    product.brand,
+        volume:   product.volume,
+        price:    product.price,
+        address:  form.address,
+        phone:    form.phone,
+        quantity,
+        timeSlot: selectedSlot,
+        comment:  form.comment || '',
+      });
+
+      // Очищаем форму из AsyncStorage после успешной отправки
       AsyncStorage.removeItem(STORAGE_KEY).catch(() => {});
+
       Alert.alert(
         '🎉 Заказ оформлен!',
         `${product.brand} ${product.volume} × ${quantity}\nДоставка: ${selectedSlot}\nСумма: ${product.price * quantity} ₽`,
         [{ text: 'Отлично!', onPress: () => navigation.navigate('Main', { screen: 'Profile' }) }]
       );
+    } catch (e) {
+      Alert.alert('Ошибка', 'Не удалось отправить заказ. Проверьте интернет-соединение.');
+    } finally {
+      setSending(false);
     }
   };
 
@@ -222,10 +238,11 @@ export default function OrderScreen({ route, navigation }) {
             importantForAutofill="no"
           />
 
-          <TouchableOpacity style={styles.orderButton} onPress={handleOrder}>
-            <Text style={styles.orderButtonText}>
-              Оформить заказ — {product.price * quantity} ₽
-            </Text>
+          <TouchableOpacity style={[styles.orderButton, sending && { opacity: 0.7 }]} onPress={handleOrder} disabled={sending}>
+            {sending
+              ? <ActivityIndicator color={COLORS.white} />
+              : <Text style={styles.orderButtonText}>Оформить заказ — {product.price * quantity} ₽</Text>
+            }
           </TouchableOpacity>
 
           <View style={{ height: SPACING.xl }} />

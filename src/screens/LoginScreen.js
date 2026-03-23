@@ -12,7 +12,6 @@ export default function LoginScreen({ navigation }) {
   const [form, setForm] = useState({ email: '', password: '' });
   const [errors, setErrors] = useState({});
 
-  // Загружаем сохранённый email при открытии экрана
   useEffect(() => {
     AsyncStorage.getItem(STORAGE_KEY).then((raw) => {
       if (raw) {
@@ -22,7 +21,6 @@ export default function LoginScreen({ navigation }) {
     }).catch(() => {});
   }, []);
 
-  // Сохраняем email при каждом изменении (пароль не сохраняем из соображений безопасности)
   const updateField = (field, value) => {
     const updated = { ...form, [field]: value };
     setForm(updated);
