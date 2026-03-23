@@ -1,13 +1,37 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, SafeAreaView, ScrollView,
   TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Alert,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS, FONTS, SPACING } from '../constants/theme';
+
+const STORAGE_KEY = 'login_form';
 
 export default function LoginScreen({ navigation }) {
   const [form, setForm] = useState({ email: '', password: '' });
   const [errors, setErrors] = useState({});
+
+  // Загружаем сохранённый email при открытии экрана
+  useEffect(() => {
+    AsyncStorage.getItem(STORAGE_KEY).then((raw) => {
+      if (raw) {
+        const saved = JSON.parse(raw);
+        setForm((prev) => ({ ...prev, email: saved.email || '' }));
+      }
+    }).catch(() => {});
+  }, []);
+
+  // Сохраняем email при каждом изменении (пароль не сохраняем из соображений безопасности)
+  const updateField = (field, value) => {
+    const updated = { ...form, [field]: value };
+    setForm(updated);
+    if (errors[field]) setErrors((prev) => ({ ...prev, [field]: null }));
+
+    if (field === 'email') {
+      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ email: value })).catch(() => {});
+    }
+  };
 
   const validate = () => {
     const newErrors = {};
@@ -22,11 +46,6 @@ export default function LoginScreen({ navigation }) {
     if (validate()) {
       navigation.replace('Main');
     }
-  };
-
-  const updateField = (field, value) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
-    if (errors[field]) setErrors((prev) => ({ ...prev, [field]: null }));
   };
 
   return (

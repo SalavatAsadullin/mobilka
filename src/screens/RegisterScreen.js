@@ -1,26 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, SafeAreaView, ScrollView,
   TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Alert,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS, FONTS, SPACING } from '../constants/theme';
 import { saveUser } from '../services/database';
- 
-const handleRegister = () => {
-  if (!validate()) return;
- 
-  try {
-    saveUser(form.name, form.email, form.phone);
- 
-    Alert.alert('Успешно', 'Аккаунт создан!', [
-      { text: 'OK',
-        onPress: () => navigation.replace('Main') },
-    ]);
-  } catch (error) {
-    Alert.alert('Ошибка', 'Не удалось сохранить данные');
-  }
-};
- 
+
+const STORAGE_KEY = 'register_form';
 
 export default function RegisterScreen({ navigation }) {
   const [form, setForm] = useState({
@@ -30,22 +17,43 @@ export default function RegisterScreen({ navigation }) {
     password: '',
     confirmPassword: '',
   });
-
   const [errors, setErrors] = useState({});
+
+  // Загружаем сохранённые поля при открытии (кроме паролей)
+  useEffect(() => {
+    AsyncStorage.getItem(STORAGE_KEY).then((raw) => {
+      if (raw) {
+        const saved = JSON.parse(raw);
+        setForm((prev) => ({
+          ...prev,
+          name:  saved.name  || '',
+          email: saved.email || '',
+          phone: saved.phone || '',
+        }));
+      }
+    }).catch(() => {});
+  }, []);
+
+  // Сохраняем поля при каждом изменении (пароли не сохраняем)
+  const updateField = (field, value) => {
+    const updated = { ...form, [field]: value };
+    setForm(updated);
+    if (errors[field]) setErrors((prev) => ({ ...prev, [field]: null }));
+
+    if (['name', 'email', 'phone'].includes(field)) {
+      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({
+        name:  field === 'name'  ? value : form.name,
+        email: field === 'email' ? value : form.email,
+        phone: field === 'phone' ? value : form.phone,
+      })).catch(() => {});
+    }
+  };
 
   const handlePhoneChange = (value) => {
     let cleaned = value.replace(/[^\d+]/g, '');
-
-    if (cleaned.startsWith('8')) {
-      cleaned = '+7' + cleaned.slice(1);
-    }
-
-    if (cleaned.startsWith('7') && !cleaned.startsWith('+7')) {
-      cleaned = '+' + cleaned;
-    }
-
+    if (cleaned.startsWith('8')) cleaned = '+7' + cleaned.slice(1);
+    if (cleaned.startsWith('7') && !cleaned.startsWith('+7')) cleaned = '+' + cleaned;
     if (cleaned.length > 12) return;
-
     updateField('phone', cleaned);
   };
 
@@ -54,48 +62,40 @@ export default function RegisterScreen({ navigation }) {
 
     if (!form.name.trim()) {
       newErrors.name = 'Введите имя';
+    } else if (!/^[a-zA-Zа-яёА-ЯЁ]/.test(form.name.trim())) {
+      newErrors.name = 'Имя должно начинаться с буквы';
+    } else if (!/^[a-zA-Zа-яёА-ЯЁ][a-zA-Zа-яёА-ЯЁ0-9 _-]*$/.test(form.name.trim())) {
+      newErrors.name = 'Имя не должно содержать спецсимволы';
     }
 
-    if (!form.email.trim()) {
-      newErrors.email = 'Введите email';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
-      newErrors.email = 'Некорректный email';
-    }
+    if (!form.email.trim()) newErrors.email = 'Введите email';
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) newErrors.email = 'Некорректный email';
 
-    if (!form.phone.trim()) {
-      newErrors.phone = 'Введите телефон';
-    } else if (!/^\+7\d{10}$/.test(form.phone)) {
-      newErrors.phone = 'Формат: +79991234567 или 89991234567';
-    }
+    if (!form.phone.trim()) newErrors.phone = 'Введите телефон';
+    else if (!/^\+7\d{10}$/.test(form.phone)) newErrors.phone = 'Формат: +79991234567 или 89991234567';
 
-    if (!form.password) {
-      newErrors.password = 'Введите пароль';
-    } else if (form.password.length < 6) {
-      newErrors.password = 'Минимум 6 символов';
-    }
+    if (!form.password) newErrors.password = 'Введите пароль';
+    else if (form.password.length < 6) newErrors.password = 'Минимум 6 символов';
 
-    if (!form.confirmPassword) {
-      newErrors.confirmPassword = 'Подтвердите пароль';
-    } else if (form.password !== form.confirmPassword) {
-      newErrors.confirmPassword = 'Пароли не совпадают';
-    }
+    if (!form.confirmPassword) newErrors.confirmPassword = 'Подтвердите пароль';
+    else if (form.password !== form.confirmPassword) newErrors.confirmPassword = 'Пароли не совпадают';
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
   const handleRegister = () => {
-    if (validate()) {
-      Alert.alert('Успешно!', 'Регистрация завершена', [
-        { text: 'Войти', onPress: () => navigation.replace('Main') },
-      ]);
-    }
-  };
+    if (!validate()) return;
 
-  const updateField = (field, value) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
-    if (errors[field]) {
-      setErrors((prev) => ({ ...prev, [field]: null }));
+    try {
+      saveUser(form.name, form.email, form.phone);
+      // После успешной регистрации очищаем сохранённые данные формы
+      AsyncStorage.removeItem(STORAGE_KEY).catch(() => {});
+      Alert.alert('Успешно', 'Аккаунт создан!', [
+        { text: 'OK', onPress: () => navigation.replace('Main') },
+      ]);
+    } catch (error) {
+      Alert.alert('Ошибка', 'Не удалось сохранить данные');
     }
   };
 
@@ -106,7 +106,6 @@ export default function RegisterScreen({ navigation }) {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-
           <Text style={styles.title}>Регистрация</Text>
           <Text style={styles.subtitle}>Создайте аккаунт для заказа воды</Text>
 
@@ -163,7 +162,6 @@ export default function RegisterScreen({ navigation }) {
           </TouchableOpacity>
 
           <View style={{ height: SPACING.xl }} />
-
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

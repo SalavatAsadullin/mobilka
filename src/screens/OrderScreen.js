@@ -1,12 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
   TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS, FONTS, SPACING } from '../constants/theme';
+import { saveOrder, loadUser } from '../services/database';
 
 const TIME_SLOTS = ['09:00–11:00', '11:00–13:00', '13:00–15:00', '15:00–17:00', '17:00–19:00'];
+const STORAGE_KEY = 'order_form';
 
 export default function OrderScreen({ route, navigation }) {
   const { product } = route.params;
@@ -16,19 +19,49 @@ export default function OrderScreen({ route, navigation }) {
   const [selectedSlot, setSelectedSlot] = useState(null);
   const [errors, setErrors] = useState({});
 
+  // Загружаем сохранённые данные формы при открытии экрана
+  useEffect(() => {
+    const loadSaved = async () => {
+      try {
+        // Сначала пробуем восстановить данные формы из AsyncStorage
+        const raw = await AsyncStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const saved = JSON.parse(raw);
+          setForm({
+            address: saved.address || '',
+            phone:   saved.phone   || '',
+            comment: saved.comment || '',
+          });
+          if (saved.quantity) setQuantity(saved.quantity);
+          if (saved.selectedSlot) setSelectedSlot(saved.selectedSlot);
+        } else {
+          // Если ничего не сохранено — подставляем телефон из профиля
+          const user = loadUser();
+          if (user?.phone) {
+            setForm((prev) => ({ ...prev, phone: user.phone }));
+          }
+        }
+      } catch (_) {}
+    };
+    loadSaved();
+  }, []);
+
+  // Сохраняем всю форму при каждом изменении
+  const saveToStorage = (updatedForm, updatedQuantity, updatedSlot) => {
+    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({
+      address:      updatedForm.address,
+      phone:        updatedForm.phone,
+      comment:      updatedForm.comment,
+      quantity:     updatedQuantity,
+      selectedSlot: updatedSlot,
+    })).catch(() => {});
+  };
+
   const handlePhoneChange = (value) => {
     let cleaned = value.replace(/[^\d+]/g, '');
-
-    if (cleaned.startsWith('8')) {
-      cleaned = '+7' + cleaned.slice(1);
-    }
-
-    if (cleaned.startsWith('7') && !cleaned.startsWith('+7')) {
-      cleaned = '+' + cleaned;
-    }
-
+    if (cleaned.startsWith('8')) cleaned = '+7' + cleaned.slice(1);
+    if (cleaned.startsWith('7') && !cleaned.startsWith('+7')) cleaned = '+' + cleaned;
     if (cleaned.length > 12) return;
-
     updateField('phone', cleaned);
   };
 
@@ -38,33 +71,45 @@ export default function OrderScreen({ route, navigation }) {
   };
 
   const updateField = (field, value) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
+    const updated = { ...form, [field]: value };
+    setForm(updated);
     if (errors[field]) setErrors((prev) => ({ ...prev, [field]: null }));
+    saveToStorage(updated, quantity, selectedSlot);
+  };
+
+  const changeQuantity = (delta) => {
+    const next = Math.max(1, quantity + delta);
+    setQuantity(next);
+    saveToStorage(form, next, selectedSlot);
+  };
+
+  const changeSlot = (slot) => {
+    setSelectedSlot(slot);
+    setErrors((prev) => ({ ...prev, slot: null }));
+    saveToStorage(form, quantity, slot);
   };
 
   const validate = () => {
     const newErrors = {};
-
-    if (!form.address.trim()) {
-      newErrors.address = 'Введите адрес доставки';
-    } else if (form.address.trim().length < 5) {
-      newErrors.address = 'Адрес слишком короткий';
-    }
-
-    if (!form.phone.trim()) {
-      newErrors.phone = 'Введите телефон';
-    } else if (!/^\+7\d{10}$/.test(form.phone)) {
-      newErrors.phone = 'Формат: +79991234567 или 89991234567';
-    }
-
+    if (!form.address.trim()) newErrors.address = 'Введите адрес доставки';
+    else if (form.address.trim().length < 5) newErrors.address = 'Адрес слишком короткий';
+    if (!form.phone.trim()) newErrors.phone = 'Введите телефон';
+    else if (!/^\+7\d{10}$/.test(form.phone)) newErrors.phone = 'Формат: +79991234567 или 89991234567';
     if (!selectedSlot) newErrors.slot = 'Выберите время доставки';
-
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
   const handleOrder = () => {
     if (validate()) {
+      try {
+        saveOrder(
+          product.brand, product.volume, product.price,
+          form.address, form.phone, quantity, selectedSlot, form.comment
+        );
+      } catch (_) {}
+      // После успешного заказа очищаем сохранённые данные формы
+      AsyncStorage.removeItem(STORAGE_KEY).catch(() => {});
       Alert.alert(
         '🎉 Заказ оформлен!',
         `${product.brand} ${product.volume} × ${quantity}\nДоставка: ${selectedSlot}\nСумма: ${product.price * quantity} ₽`,
@@ -97,17 +142,11 @@ export default function OrderScreen({ route, navigation }) {
 
           <Text style={styles.sectionLabel}>Количество</Text>
           <View style={styles.quantityRow}>
-            <TouchableOpacity
-              style={styles.qtyButton}
-              onPress={() => setQuantity((q) => Math.max(1, q - 1))}
-            >
+            <TouchableOpacity style={styles.qtyButton} onPress={() => changeQuantity(-1)}>
               <Text style={styles.qtyButtonText}>−</Text>
             </TouchableOpacity>
             <Text style={styles.qtyValue}>{quantity}</Text>
-            <TouchableOpacity
-              style={styles.qtyButton}
-              onPress={() => setQuantity((q) => q + 1)}
-            >
+            <TouchableOpacity style={styles.qtyButton} onPress={() => changeQuantity(1)}>
               <Text style={styles.qtyButtonText}>+</Text>
             </TouchableOpacity>
             <Text style={styles.totalPrice}>= {product.price * quantity} ₽</Text>
@@ -153,10 +192,7 @@ export default function OrderScreen({ route, navigation }) {
               <TouchableOpacity
                 key={slot}
                 style={[styles.slot, selectedSlot === slot && styles.slotActive]}
-                onPress={() => {
-                  setSelectedSlot(slot);
-                  setErrors((prev) => ({ ...prev, slot: null }));
-                }}
+                onPress={() => changeSlot(slot)}
               >
                 <Text style={[styles.slotText, selectedSlot === slot && styles.slotTextActive]}>
                   {slot}
@@ -193,7 +229,6 @@ export default function OrderScreen({ route, navigation }) {
           </TouchableOpacity>
 
           <View style={{ height: SPACING.xl }} />
-
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -224,11 +259,7 @@ const styles = StyleSheet.create({
     fontSize: FONTS.body - 1, fontWeight: '600',
     color: COLORS.text, marginBottom: 8, marginTop: SPACING.sm,
   },
-  charCount: {
-    fontSize: FONTS.caption,
-    color: COLORS.textLight,
-    fontWeight: '400',
-  },
+  charCount: { fontSize: FONTS.caption, color: COLORS.textLight, fontWeight: '400' },
   quantityRow: { flexDirection: 'row', alignItems: 'center', marginBottom: SPACING.sm },
   qtyButton: {
     width: 40, height: 40, borderRadius: 10,
